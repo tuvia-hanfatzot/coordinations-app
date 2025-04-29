@@ -18,7 +18,11 @@ PERSONNEL_TRANSLATIONS = {
     "patient": "מטופל",
     "patient's companion": "מלווה",
     "security escort": "נוסע - מאבטח",
-    "suno": "בכיר"
+    "suno": "בכיר",
+    "south to north": "\u200F(מדרום לצפון)\u200F",
+    "north to south": "\u200F(מצפון לדרום)\u200F",
+    "leaving gaza": "\u200F(יוצא מרצע)\u200F",
+    "entering gaza": "\u200F(נכנס לרצע)\u200F"
 }
 VEHICLE_TRANSLATIONS = {
     "truck": "משאית",
@@ -205,60 +209,101 @@ def check_white_wheels(ids):
                 return "גלגלים לבנים"
     return ""
 
+def translate_personnel_role(text):
+    if not isinstance(text, str) or not text.strip():
+        return "[MISSING DATA]"  # IMPORTANT: Capital letters
+
+    original_text = text.strip()  # Save original casing
+    text = original_text.lower()  # Use lowercase only for matching
+    main_role = ""
+    notes = []
+
+    for eng_term, heb_term in PERSONNEL_TRANSLATIONS.items():
+        if eng_term in text:
+            if "(" in heb_term:  # Direction/note
+                notes.append(heb_term)
+            else:  # Main role
+                main_role = heb_term
+
+    if main_role:
+        if notes:
+            return f"{main_role} {' '.join(notes)}"
+        else:
+            return main_role
+    else:
+        if notes:
+            return ' '.join(notes)
+        else:
+            return original_text  # Return original text, keeping capitals
+
 def extract_personnel_table_data(df):
     """
-    Extracts personnel table data while ensuring that 'NOTES' are properly included.
-    Allows skipping single empty rows while continuing extraction.
+    Extracts personnel table data while ignoring 'Phone #' and flexibly finding 'NOTES (' column.
     """
-    headers = ["ID", "Name", "NOTES (In and out of Gaza, Role, etc…)"]
-    header_indices = {header.lower(): None for header in headers}
-
+    personnel_headers = ["name", "id", "notes ("]
+    header_indices = {header: None for header in personnel_headers}
     personnel_start_row = None
     empty_row_count = 0
-    max_empty_rows_allowed = 1  # Adjust to allow more empty rows if needed
+    max_empty_rows_allowed = 1
 
-    # Identify the header row dynamically
+    # Find the row that contains all personnel headers
     for row in range(len(df)):
-        for col in range(len(df.columns)):
-            cell_value = str(df.iloc[row, col]).strip().lower()
-            if cell_value in header_indices:
-                header_indices[cell_value] = col
-                if personnel_start_row is None:
-                    personnel_start_row = row
+        row_values = [str(cell).strip().lower() for cell in df.iloc[row]]
+        if all(any(header in cell for cell in row_values) for header in personnel_headers):
+            personnel_start_row = row
+            for col in range(len(df.columns)):
+                cell_value = str(df.iloc[row, col]).strip().lower()
+                for header in personnel_headers:
+                    if header in cell_value and header_indices[header] is None:
+                        header_indices[header] = col
+            break
 
-    if None in header_indices.values() or personnel_start_row is None:
+    if personnel_start_row is None or None in header_indices.values():
         return [], "[MISSING PERSONNEL DATA]"
 
     extracted_data = []
     id_list = []
 
-    for row in range(personnel_start_row + 1, len(df)):  
+    for row in range(personnel_start_row + 1, len(df)):
         row_data = {}
-        is_empty_row = True  # Assume row is empty
+        is_empty_row = True
 
-        for key, col_index in header_indices.items():
-            cell_value = df.iloc[row, col_index] if col_index is not None else ""
+        for key in ["id", "name"]:
+            col_index = header_indices[key]
+            if col_index is not None:
+                cell_value = df.iloc[row, col_index]
+                if pd.isna(cell_value) or str(cell_value).strip() == "":
+                    cell_value = "[MISSING DATA]"
+                elif isinstance(cell_value, float):
+                    cell_value = str(int(cell_value))
+                else:
+                    cell_value = str(cell_value).strip()
 
-            if pd.isna(cell_value) or str(cell_value).strip() == "":
-                cell_value = "[MISSING DATA]"
-            elif isinstance(cell_value, float):
-                cell_value = str(int(cell_value))
-            else:
-                cell_value = str(cell_value).strip()
+                if cell_value != "[MISSING DATA]":
+                    is_empty_row = False
 
-            if cell_value != "[MISSING DATA]":
-                is_empty_row = False  # Row contains valid data
+                row_data[key] = cell_value
+                if key == "id":
+                    id_list.append(cell_value)
 
-            row_data[key.lower()] = cell_value
-            if key == "id":
-                id_list.append(cell_value)
+        notes_col_index = header_indices["notes ("]
+        notes_value = df.iloc[row, notes_col_index] if notes_col_index is not None else ""
+        if pd.isna(notes_value) or str(notes_value).strip() == "":
+            notes_value = "[MISSING DATA]"
+        else:
+            notes_value = str(notes_value).strip()
+
+        if notes_value != "[MISSING DATA]":
+            is_empty_row = False
+
+        row_data["notes"] = notes_value
 
         if is_empty_row:
             empty_row_count += 1
             if empty_row_count > max_empty_rows_allowed:
-                break  # Stop extraction after too many empty rows
+                break
         else:
-            empty_row_count = 0  # Reset empty row count if valid data appears
+            empty_row_count = 0
             extracted_data.append(row_data)
 
     white_wheels_text = check_white_wheels(id_list)
@@ -282,7 +327,7 @@ def update_personnel_table(doc_path, extracted_data, white_wheels_text):
     for index, row_data in enumerate(extracted_data, start=1):
         new_row = table.add_row().cells
         new_row[0].text = f".{index}"  # Numbering
-        new_row[1].text = PERSONNEL_TRANSLATIONS.get(row_data.get("notes (in and out of gaza, role, etc…)", "").lower(), row_data.get("notes (in and out of gaza, role, etc…)", "[MISSING DATA]"))  # Role in Hebrew
+        new_row[1].text = translate_personnel_role(row_data.get("notes", ""))
         new_row[2].text = row_data.get("name", "[MISSING DATA]")  # Name
         new_row[3].text = row_data.get("id", "[MISSING DATA]")  # ID
 
@@ -420,18 +465,46 @@ def update_vehicle_table(doc_path, extracted_vehicles):
 
 def extract_equipment_status(df):
     """
-    Extracts equipment status and translates 'yes' to 'יש' and 'no' to 'אין'.
+    Scans rows between 'Equipment' and two rows above 'NOTES' to determine if any cell contains 'yes'.
+    Returns 'יש ציוד' if found, else 'אין ציוד'.
     """
-    equipment_status = extract_below_target(df, "Equipment")
+    equipment_row, equipment_col = None, None
+    notes_row = None
 
-    if isinstance(equipment_status, str):
-        equipment_status = equipment_status.strip().lower()
-        if equipment_status == "yes":
-            return "יש"
-        elif equipment_status == "no":
-            return "אין"
+    # First: find 'Equipment' position
+    for row in range(len(df)):
+        for col in range(len(df.columns)):
+            cell_value = str(df.iloc[row, col]).strip().lower()
+            if "equipment" in cell_value:
+                equipment_row = row
+                equipment_col = col
+                break
+        if equipment_row is not None:
+            break
 
-    return equipment_status  # Return as is if it's neither "yes" nor "no"
+    # Second: find 'NOTES' position
+    for row in range(len(df)):
+        for col in range(len(df.columns)):
+            cell_value = str(df.iloc[row, col]).strip().lower()
+            if "notes (" in cell_value:
+                notes_row = row
+                break
+        if notes_row is not None:
+            break
+
+    # Validate we found both
+    if equipment_row is None or notes_row is None:
+        return "[MISSING EQUIPMENT OR NOTES]"
+
+    # Scan between equipment_row+1 and notes_row-2
+    for row in range(equipment_row + 1, notes_row - 1):
+        for col in range(len(df.columns)):
+            cell_value = str(df.iloc[row, col]).strip().lower()
+            if cell_value == "yes":
+                return "יש ציוד"
+
+    # If no 'yes' found
+    return "אין ציוד"
 
 # Function to set font properties in Word tables
 def set_font(cell, font_name="David", font_size=12):
