@@ -1,1 +1,6 @@
 streamlit
+pandas
+openpyxl
+docxtpl
+python-docx
+pyproj
