@@ -19,10 +19,10 @@ PERSONNEL_TRANSLATIONS = {
     "patient's companion": "מלווה",
     "security escort": "נוסע - מאבטח",
     "suno": "בכיר",
-    "south to north": "\u200F(מדרום לצפון)\u200F",
-    "north to south": "\u200F(מצפון לדרום)\u200F",
-    "leaving gaza": "\u200F(יוצא מרצע)\u200F",
-    "entering gaza": "\u200F(נכנס לרצע)\u200F"
+    "south to north": "\u200F)מדרום לצפון(\u200F",
+    "north to south": "\u200F)מצפון לדרום(\u200F",
+    "leaving gaza": "\u200F)יוצא מרצע(\u200F",
+    "entering gaza": "\u200F)נכנס לרצע(\u200F"
 }
 VEHICLE_TRANSLATIONS = {
     "truck": "משאית",
@@ -227,14 +227,14 @@ def translate_personnel_role(text):
 
     if main_role:
         if notes:
-            return f"{main_role} {' '.join(notes)}"
+            return f"\u202B{main_role} {' '.join(notes)}\u202C"
         else:
-            return main_role
+            return f"\u202B{main_role}\u202C"
     else:
         if notes:
-            return ' '.join(notes)
+            return f"\u202B{' '.join(notes)}\u202C"
         else:
-            return original_text  # Return original text, keeping capitals
+            return original_text  # keep as is if nothing found
 
 def extract_personnel_table_data(df):
     """
