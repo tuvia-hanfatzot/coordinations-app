@@ -4,3 +4,4 @@ openpyxl
 docxtpl
 python-docx
 pyproj
+matplotlib
