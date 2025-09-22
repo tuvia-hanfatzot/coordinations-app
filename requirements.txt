@@ -5,3 +5,4 @@ docxtpl
 python-docx
 pyproj
 matplotlib
+contextily
