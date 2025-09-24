@@ -18,6 +18,8 @@ from docxtpl import InlineImage
 from docx.shared import Cm
 import contextily as cx
 from pyproj import Transformer
+import json, os
+from shapely.geometry import shape, Point
 
 # Put this near the top (after imports)
 transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32636", always_xy=True)
@@ -112,6 +114,30 @@ def translate_site_name(name: str) -> str:
         if key in low:
             return heb
     return s
+
+# --- Permanent polygons loaded from a local GeoJSON you dropped into the app folder ---
+POLYGONS = []
+_GEOJSON_PATH = "south and north polygons.geojson"  # <-- rename to your actual file name
+
+if os.path.exists(_GEOJSON_PATH):
+    try:
+        with open(_GEOJSON_PATH, "r", encoding="utf-8") as f:
+            gj = json.load(f)
+        feats = gj["features"] if gj.get("type") == "FeatureCollection" else [gj]
+        # Build shapely geometries (handles Polygon and MultiPolygon)
+        for ft in feats:
+            geom = shape(ft["geometry"])
+            if geom.geom_type == "Polygon":
+                POLYGONS.append(geom)
+            elif geom.geom_type == "MultiPolygon":
+                POLYGONS.extend(list(geom.geoms))
+        # Optional: assert we actually got at least 2 polygons
+        if len(POLYGONS) < 2:
+            st.warning("GeoJSON loaded but found fewer than 2 polygons.")
+    except Exception as e:
+        st.warning(f"Failed to read polygons GeoJSON '{_GEOJSON_PATH}': {e}")
+else:
+    st.info(f"Place your polygons GeoJSON in the app folder as '{_GEOJSON_PATH}'.")
 
 # Utility Functions
 def extract_below_target(df, target, max_offset=3):
@@ -366,6 +392,26 @@ def _parse_lat_lon(coord_text: str):
                 return lat_dd, lon_dd
 
     return None
+
+def crossing_cp_from_polys(sites, polys) -> str:
+    """
+    Returns 'כן' if site points touch 2 or more polygons; otherwise 'לא'.
+    Points outside all polygons are ignored.
+    """
+    if not sites or not polys:
+        return "[MISSING DATA]"
+    touched = set()
+    for s in sites:
+        pt = Point(s["lon"], s["lat"])  # (x=lon, y=lat)
+        for i, poly in enumerate(polys):
+            try:
+                if poly.covers(pt):  # boundary counts as inside
+                    touched.add(i)
+                    if len(touched) >= 2:
+                        return "כן"
+            except Exception:
+                pass
+    return "לא"
 
 def count_coordinates_levels(df):
     """Extract unique (ordered) site rows; stop at other sections.
@@ -1145,6 +1191,7 @@ if uploaded_excel and user_name:
     formatted_levels = "\n".join(count_coordinates_levels(df))
     # Build the sites map image
     sites = extract_sites_for_map(df)
+    crossing_cp = crossing_cp_from_polys(sites, POLYGONS)
     sites_map_img = ""
     if sites:
         img_path = generate_sites_map_image(sites, out_path="sites_map.png")
@@ -1168,6 +1215,7 @@ if uploaded_excel and user_name:
         "mission": mission,
         "equipment_list": equipment_list,
         "sites_map": sites_map_img,
+        "crossing_cp": crossing_cp,
     }
     doc.render(data_dict)
 
